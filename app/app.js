@@ -377,7 +377,8 @@ async function tomarFoto(dataURLExterno) {
   const conExif = escribirExif(dataURL, r);
   r.blob = dataURLaBlob(conExif);
   r.thumb = await miniatura(conExif);
-  try { await dbPut(r); } catch (e) { toast('No se pudo guardar: ' + e.message, 4000); return; }
+  try { r.id = await dbPut(r); } catch (e) { toast('No se pudo guardar: ' + e.message, 4000); return; }
+  encolarAnalisis(r.id);
   recordarNombresYClaves(personas, extras);
   lsSet('ultimoForm', { personas: form.personas, extras: form.extras.filter((e) => norm(e.k) !== 'dia del cultivo') });
   // para la siguiente foto: fecha vuelve a automática y las coordenadas se piden de nuevo
@@ -529,7 +530,7 @@ async function pintarGaleria() {
     const c = document.createElement('button'); c.className = 'cel';
     c.style.backgroundImage = `url(${f.thumb})`;
     const cap = [(f.personas || [])[0], f.ciudad].filter(Boolean).join(' · ') || fmtFechaCorta(new Date(f.fecha));
-    c.innerHTML = (f.ubicPendiente ? '<span class="pend">sin ubicación</span>' : '') + `<span class="cap">${esc(cap)}</span>`;
+    c.innerHTML = (f.origen === 'importada' ? '<span class="bdg">importada</span>' : '') + (f.ubicPendiente ? '<span class="pend">sin ubicación</span>' : '') + `<span class="cap">${esc(cap)}</span>`;
     c.onclick = () => abrirFicha(f.id);
     g.appendChild(c);
   });
@@ -540,16 +541,19 @@ async function pintarGaleria() {
 async function abrirFicha(id) {
   const f = await dbGet(id); if (!f) return;
   fichaActual = f;
+  modoManual = false; $('hintManual').classList.add('hidden');
+  await resugerir(f);
   urlsGal.forEach((u) => URL.revokeObjectURL(u)); urlsGal = [];
   const u = URL.createObjectURL(f.blob); urlsGal.push(u); $('fichaImg').src = u;
   const d = new Date(f.fecha);
   const filas = [
-    ['Fecha', `${fmtFechaCorta(d)} · ${fmtHora(d, false)}`],
+    ['Fecha', `${fmtFechaCorta(d)} · ${fmtHora(d, false)}` + (f.fechaRevisar ? ' (revisar)' : '')],
     ['Lugar', lugarTexto(f) || (f.ubicPendiente ? 'pendiente' : (f.geoInt ? 'se completa con internet' : '—'))],
     ['Altitud', fmtAlt(f.altitud) || '—'],
-    ['Personas', (f.personas || []).join(', ') || '—'],
+    ['Personas', [...new Set([...(f.personas || []), ...nombresConfirmados(f)])].join(', ') || '—'],
     ...(f.extras || []).map((e) => [e.k || 'Extra', e.v]),
   ];
+  if (f.origen === 'importada') filas.push(['Origen', 'Importada de Fotos']);
   if (f.coords) filas.push(['Coordenadas', `${f.coords.lat.toFixed(6)}, ${f.coords.lon.toFixed(6)} (±${Math.round(f.coords.acc)} m)`]);
   $('fichaCampos').innerHTML = filas.map(([k, v]) => `<div class="f"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('');
   $('fichaPend').classList.toggle('hidden', !f.ubicPendiente);
@@ -559,9 +563,14 @@ async function abrirFicha(id) {
     : 'Esta foto se tomó sin ubicación. Activa la ubicación para completarla, o usa Editar para ponerla a mano.';
   $('btnFichaExacta').classList.toggle('hidden', !(f.geoInt || f.coords));
   mostrar('scrFicha');
+  pintarCaras();
+  prepararCompartir(f);
+  if (!f.carasAnalizadas && !analizando.has(f.id) && !intentados.has(f.id)) { intentados.add(f.id); encolarAnalisis(f.id); }
 }
+let modoManual = false;
 async function guardarFichaEditada() {
   const f = fichaActual; const { personas, extras } = limpiarListas();
+  if (f.fechaRevisar && form.fechaManual && form.fechaManual !== f.fecha) f.fechaRevisar = false;
   f.fecha = fechaDelForm().toISOString();
   f.personas = personas;
   const dia = diaCultivo(extras, f.fecha);
@@ -587,13 +596,314 @@ function nombreArchivo(f) {
   return base + '.jpg';
 }
 async function compartirFoto(f, conTexto) {
-  const file = new File([f.blob], nombreArchivo(f), { type: 'image/jpeg' });
+  if (compartirListo.id !== f.id || !compartirListo.blob) { toast('Preparando la foto… toca otra vez en un segundo.'); if (compartirListo.id !== f.id) prepararCompartir(f); return; }
+  const file = new File([compartirListo.blob], nombreArchivo(f), { type: 'image/jpeg' });
   const datos = { files: [file] }; if (conTexto) datos.text = textoFicha(f);
   if (navigator.canShare && navigator.canShare(datos)) {
     try { await navigator.share(datos); } catch (e) { /* cancelado */ }
   } else {
-    const a = document.createElement('a'); a.href = URL.createObjectURL(f.blob); a.download = file.name; a.click();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
   }
+}
+
+/* ======================= reconocimiento facial (face-api, todo dentro del teléfono) ======================= */
+// Opción A aprobada por Mojon (30-sep): detecta caras, SUGIERE nombre solo con alta seguridad ("Nombre ?"),
+// nada queda confirmado sin un toque del usuario, y cada confirmación enseña a la app.
+// Prueba 30-sep: personas distintas llegaron a distancia 0.476 -> umbral estricto + margen contra el 2º candidato.
+const UMBRAL_CARA = 0.45, MARGEN_CARA = 0.08;
+let faceListo = null, colaCaras = Promise.resolve(), errorCaras = '';
+const analizando = new Set(), intentados = new Set(); // intentados: evita reintentar en bucle si falla
+function cargarFaceApi() {
+  if (faceListo) return faceListo;
+  faceListo = (async () => {
+    if (!window.faceapi) {
+      await new Promise((res, rej) => {
+        const s = document.createElement('script'); s.src = 'lib/face-api.js';
+        s.onload = res; s.onerror = () => rej(new Error('no se pudo cargar el motor de caras')); document.head.appendChild(s);
+      });
+    }
+    let ok = false;
+    try { ok = await faceapi.tf.setBackend('webgl'); } catch (e) { ok = false; }
+    if (!ok) await faceapi.tf.setBackend('cpu');
+    await faceapi.tf.ready();
+    await Promise.all([
+      faceapi.nets.ssdMobilenetv1.loadFromUri('models'),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri('models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('models'),
+    ]);
+    return true;
+  })();
+  faceListo.catch(() => { faceListo = null; });
+  return faceListo;
+}
+function cargarImagen(blob) {
+  return new Promise((res, rej) => {
+    const u = URL.createObjectURL(blob); const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(u); res(img); }; img.onerror = rej; img.src = u;
+  });
+}
+async function detectarCaras(blob) {
+  await cargarFaceApi();
+  const img = await cargarImagen(blob);
+  const k = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  const r = await faceapi.detectAllFaces(c, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 })).withFaceLandmarks(true).withFaceDescriptors();
+  return r.map((x) => {
+    const b = x.detection.box;
+    return { x: b.x / c.width, y: b.y / c.height, w: b.width / c.width, h: b.height / c.height, desc: Array.from(x.descriptor), nombre: '', estado: '' };
+  }).sort((a, b) => a.x - b.x);
+}
+function distCara(a, b) { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s); }
+async function rostrosConocidos(excluirId) {
+  const out = {};
+  for (const f of await dbAll()) {
+    if (f.id === excluirId) continue;
+    (f.caras || []).forEach((c) => { if (c.estado === 'confirmado' && c.nombre && c.desc) (out[c.nombre] = out[c.nombre] || []).push(c.desc); });
+  }
+  return out;
+}
+/* Pone "sugerido" solo si el mejor candidato está muy cerca y claramente mejor que el segundo. Devuelve cuántas cambió. */
+function sugerirNombres(caras, conocidos) {
+  const nombres = Object.keys(conocidos); if (!nombres.length) return 0;
+  const cands = [];
+  caras.forEach((c, i) => {
+    if (c.estado === 'confirmado' || c.estado === 'descartado' || !c.desc) return;
+    const orden = nombres.map((n) => [n, Math.min(...conocidos[n].map((d) => distCara(c.desc, d)))]).sort((a, b) => a[1] - b[1]);
+    const [n1, d1] = orden[0]; const d2 = orden[1] ? orden[1][1] : Infinity;
+    if (d1 < UMBRAL_CARA && d2 - d1 >= MARGEN_CARA) cands.push({ i, n: n1, d: d1 });
+  });
+  cands.sort((a, b) => a.d - b.d);
+  const usados = new Set(caras.filter((c) => c.estado === 'confirmado').map((c) => norm(c.nombre)));
+  let cambios = 0;
+  caras.forEach((c) => { if (c.estado === 'sugerido') { c.estado = ''; c.nombre = ''; } });
+  for (const k of cands) {
+    if (usados.has(norm(k.n))) continue;
+    caras[k.i].nombre = k.n; caras[k.i].estado = 'sugerido'; caras[k.i].dist = Math.round(k.d * 1000) / 1000;
+    usados.add(norm(k.n)); cambios++;
+  }
+  return cambios;
+}
+function encolarAnalisis(id) { colaCaras = colaCaras.then(() => analizarFoto(id)).catch(() => {}); return colaCaras; }
+async function analizarFoto(id) {
+  if (analizando.has(id)) return;
+  analizando.add(id); errorCaras = '';
+  if (fichaActual && fichaActual.id === id) pintarCaras();
+  try {
+    const f = await dbGet(id); if (!f) return;
+    const caras = await detectarCaras(f.blob);
+    sugerirNombres(caras, await rostrosConocidos(id));
+    const g = await dbGet(id); if (!g) return;
+    g.caras = caras; g.carasAnalizadas = true; await dbPut(g);
+  } catch (e) { console.warn('caras', e); errorCaras = e.message || String(e); }
+  finally {
+    analizando.delete(id);
+    if (fichaActual && fichaActual.id === id && !$('scrFicha').classList.contains('hidden')) abrirFicha(id);
+  }
+}
+/* Al abrir una ficha: vuelve a sugerir con lo que la app aprendió desde entonces (sin volver a detectar). */
+async function resugerir(f) {
+  if (!f.caras || !f.caras.some((c) => !c.estado || c.estado === 'sugerido')) return false;
+  const antes = JSON.stringify(f.caras.map((c) => [c.nombre, c.estado]));
+  sugerirNombres(f.caras, await rostrosConocidos(f.id));
+  if (JSON.stringify(f.caras.map((c) => [c.nombre, c.estado])) === antes) return false;
+  await dbPut(f); return true;
+}
+function nombresConfirmados(f) {
+  return [...(f.caras || []).filter((c) => c.estado === 'confirmado' && c.nombre).map((c) => c.nombre),
+    ...(f.manuales || []).filter((m) => m.nombre).map((m) => m.nombre)];
+}
+function pintarCaras() {
+  const f = fichaActual; if (!f) return;
+  const capa = $('capaNombres'); capa.innerHTML = '';
+  const ver = lsGet('mostrarNombres', true);
+  $('swNombres').classList.toggle('off', !ver); $('swNombres').setAttribute('aria-checked', String(ver));
+  capa.classList.toggle('oculta', !ver);
+  const caras = f.caras || [];
+  caras.forEach((c, i) => {
+    if (c.estado === 'descartado') return;
+    const box = document.createElement('div'); box.className = 'fbox' + (c.estado === 'confirmado' ? ' ok' : '');
+    Object.assign(box.style, { left: c.x * 100 + '%', top: c.y * 100 + '%', width: c.w * 100 + '%', height: c.h * 100 + '%' });
+    const l = document.createElement('button');
+    l.className = 'lblc' + (c.estado === 'sugerido' ? ' sug' : '') + (!c.nombre ? ' nn' : '');
+    l.textContent = !c.nombre ? '¿Quién es?' : (c.estado === 'sugerido' ? c.nombre + ' ?' : c.nombre);
+    l.style.left = (c.x + c.w / 2) * 100 + '%'; l.style.top = Math.min(0.93, c.y + c.h) * 100 + '%';
+    l.onclick = (e) => { e.stopPropagation(); elegirNombre({ tipo: 'cara', i }); };
+    capa.append(box, l);
+  });
+  (f.manuales || []).forEach((m, i) => {
+    const l = document.createElement('button'); l.className = 'lblc man';
+    l.textContent = m.nombre; l.style.left = m.x * 100 + '%'; l.style.top = Math.min(0.93, m.y) * 100 + '%';
+    l.onclick = (e) => { e.stopPropagation(); elegirNombre({ tipo: 'manual', i }); };
+    capa.appendChild(l);
+  });
+  const vis = caras.filter((c) => c.estado !== 'descartado');
+  let txt = '';
+  if (analizando.has(f.id)) txt = faceListo ? 'Buscando caras…' : 'Preparando el reconocimiento de caras (la primera vez tarda más)…';
+  else if (errorCaras && !f.carasAnalizadas) txt = 'No se pudieron buscar caras: ' + errorCaras + '. Puedes poner los nombres a mano.';
+  else if (f.carasAnalizadas) {
+    const sug = vis.filter((c) => c.estado === 'sugerido').length, sin = vis.filter((c) => !c.nombre).length;
+    txt = vis.length ? `${vis.length} cara${vis.length > 1 ? 's' : ''}` + (sug ? ` · ${sug} por confirmar (toca el nombre con ?)` : '') + (sin ? ` · ${sin} sin nombre (toca "¿Quién es?")` : '')
+      : 'No se encontraron caras. Si hay personas, usa "＋ Nombre a mano".';
+  }
+  $('estadoCaras').textContent = txt;
+  $('btnDetectar').classList.toggle('hidden', analizando.has(f.id) || !!f.carasAnalizadas);
+}
+/* Ventana para elegir el nombre de una cara o etiqueta */
+function elegirNombre(obj) {
+  const f = fichaActual;
+  const actual = obj.tipo === 'cara' ? f.caras[obj.i] : obj.tipo === 'manual' ? f.manuales[obj.i] : null;
+  const puestos = new Set(nombresConfirmados(f).map(norm));
+  const lista = [...new Set([...(f.personas || []), ...lsGet('nombres', []).slice().reverse()])]
+    .filter((n) => n && !(puestos.has(norm(n)) && !(actual && norm(actual.nombre) === norm(n)))).slice(0, 12);
+  const box = $('modalTxt'); const btns = $('modalBtns');
+  box.innerHTML = `<b>${actual && actual.estado === 'sugerido' ? '¿Es ' + esc(actual.nombre) + '?' : '¿Quién es?'}</b>
+    <div class="sug" style="padding:10px 0 4px">${lista.map((n) => `<button data-n="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+    <div class="inp" style="background:var(--field);border-radius:10px;margin-top:6px"><input id="inpOtroNombre" list="dlNombres" placeholder="Otro nombre…" autocomplete="off" autocapitalize="words"></div>`;
+  btns.innerHTML = ''; btns.style.flexWrap = 'wrap';
+  const cerrar = () => { $('modal').classList.add('hidden'); btns.style.flexWrap = ''; };
+  const boton = (txt, fn, pri) => { const b = document.createElement('button'); b.className = 'btn' + (pri ? ' pri' : ''); b.textContent = txt; b.onclick = () => { cerrar(); fn(); }; btns.appendChild(b); };
+  box.querySelectorAll('[data-n]').forEach((b) => { b.onclick = () => { cerrar(); asignarNombre(obj, b.dataset.n); }; });
+  if (actual && actual.estado === 'sugerido') boton('Sí, es ' + actual.nombre, () => asignarNombre(obj, actual.nombre), true);
+  boton('Usar el nombre escrito', () => { const v = ($('inpOtroNombre').value || '').trim(); if (v) asignarNombre(obj, v); });
+  if (obj.tipo === 'cara') boton(actual && actual.nombre ? 'Quitar nombre' : 'No es una persona', () => asignarNombre(obj, actual && actual.nombre ? '' : null));
+  if (obj.tipo === 'manual') boton('Quitar etiqueta', () => asignarNombre(obj, null));
+  boton('Cancelar', () => {});
+  $('modal').classList.remove('hidden');
+}
+/* nombre: texto = confirmar; '' = dejar sin nombre; null = descartar (no es persona / quitar etiqueta) */
+async function asignarNombre(obj, nombre) {
+  const f = fichaActual;
+  if (obj.tipo === 'cara') {
+    const c = f.caras[obj.i];
+    if (nombre) {
+      f.caras.forEach((o, j) => { if (j !== obj.i && o.nombre && norm(o.nombre) === norm(nombre)) { o.nombre = ''; o.estado = ''; } });
+      c.nombre = nombre; c.estado = 'confirmado';
+    } else if (nombre === '') { c.nombre = ''; c.estado = ''; } else { c.nombre = ''; c.estado = 'descartado'; }
+  } else if (obj.tipo === 'manual') {
+    if (nombre) f.manuales[obj.i].nombre = nombre; else f.manuales.splice(obj.i, 1);
+  } else if (obj.tipo === 'nuevo' && nombre) {
+    (f.manuales = f.manuales || []).push({ x: obj.x, y: obj.y, nombre });
+  }
+  if (nombre) {
+    f.personas = f.personas || [];
+    if (!f.personas.some((p) => norm(p) === norm(nombre))) f.personas.push(nombre);
+    recordarNombresYClaves([nombre], []);
+  }
+  await reescribirFoto(f);
+  abrirFicha(f.id);
+}
+/* Copia para Fotos/Compartir: con el interruptor activado lleva escritos los nombres confirmados */
+let compartirListo = { id: null, blob: null };
+async function prepararCompartir(f) {
+  compartirListo = { id: f.id, blob: null };
+  let blob = f.blob;
+  const etiquetas = [
+    ...(f.caras || []).filter((c) => c.estado === 'confirmado' && c.nombre).map((c) => ({ t: c.nombre, x: c.x + c.w / 2, y: c.y + c.h })),
+    ...(f.manuales || []).filter((m) => m.nombre).map((m) => ({ t: m.nombre, x: m.x, y: m.y })),
+  ];
+  if (lsGet('mostrarNombres', true) && etiquetas.length) {
+    try {
+      const img = await cargarImagen(f.blob);
+      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+      const fs = Math.max(16, Math.round(c.width * 0.03)); const pd = Math.round(fs * 0.35);
+      g.font = `600 ${fs}px -apple-system, "Segoe UI", Roboto, sans-serif`; g.textBaseline = 'top';
+      etiquetas.forEach((e) => {
+        const w = g.measureText(e.t).width + pd * 2, h = fs + pd * 2;
+        let x = e.x * c.width - w / 2, y = Math.min(e.y * c.height + pd, c.height - h - 2);
+        x = Math.max(2, Math.min(x, c.width - w - 2));
+        g.fillStyle = 'rgba(0,0,0,0.72)';
+        if (g.roundRect) { g.beginPath(); g.roundRect(x, y, w, h, pd); g.fill(); } else g.fillRect(x, y, w, h);
+        g.fillStyle = '#fff'; g.fillText(e.t, x + pd, y + pd);
+      });
+      blob = dataURLaBlob(escribirExif(c.toDataURL('image/jpeg', 0.92), f));
+    } catch (e) { console.warn('nombres en copia', e); }
+  }
+  if (compartirListo.id === f.id) compartirListo.blob = blob;
+}
+
+/* ======================= importar desde Fotos (fotos ya tomadas) ======================= */
+// Límite de Apple: una web app no puede ver la fototeca sola; el usuario elige las fotos con el selector.
+// Se lee de la foto: fecha de toma (EXIF) y GPS si iOS lo entrega. El resto queda para completar a mano.
+function exifFecha(ex) {
+  const t = ex && ex.Exif && (ex.Exif[piexif.ExifIFD.DateTimeOriginal] || ex.Exif[piexif.ExifIFD.DateTimeDigitized]);
+  const m = t && /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(t);
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]); // hora local de la toma
+  return isNaN(d) ? null : d;
+}
+function exifGPS(ex) {
+  const g = ex && ex.GPS; if (!g) return null;
+  const aDec = (v) => v && v.length === 3 ? v[0][0] / v[0][1] + v[1][0] / v[1][1] / 60 + v[2][0] / v[2][1] / 3600 : NaN;
+  let lat = aDec(g[piexif.GPSIFD.GPSLatitude]), lon = aDec(g[piexif.GPSIFD.GPSLongitude]);
+  if (isNaN(lat) || isNaN(lon) || (lat === 0 && lon === 0)) return null;
+  if (g[piexif.GPSIFD.GPSLatitudeRef] === 'S') lat = -lat;
+  if (g[piexif.GPSIFD.GPSLongitudeRef] === 'W') lon = -lon;
+  const a = g[piexif.GPSIFD.GPSAltitude]; let alt = a ? a[0] / a[1] : null;
+  if (alt !== null && g[piexif.GPSIFD.GPSAltitudeRef] === 1) alt = -alt;
+  return { lat, lon, alt };
+}
+async function huellaArchivo(buf) {
+  try { const h = await crypto.subtle.digest('SHA-256', buf); return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join(''); }
+  catch (e) { return null; }
+}
+let importCancelado = false;
+async function importarFotos(files) {
+  files = [...files]; if (!files.length) return;
+  importCancelado = false; mostrar('scrImportar');
+  const lista = $('impLista'); lista.innerHTML = '';
+  const hashes = new Set((await dbAll()).map((f) => f.origenHash).filter(Boolean));
+  let hechas = 0, repetidas = 0;
+  const avance = () => {
+    $('impTitulo').textContent = hechas < files.length ? `Importando ${hechas + 1} de ${files.length}` : `Listo: ${files.length - repetidas} importada${files.length - repetidas === 1 ? '' : 's'}`;
+    $('impBarra').style.width = Math.round(hechas / files.length * 100) + '%';
+  };
+  avance();
+  for (const file of files) {
+    if (importCancelado) break;
+    const item = document.createElement('div'); item.className = 'item';
+    item.innerHTML = '<div class="th"></div><div class="txt">Leyendo…</div>'; lista.prepend(item);
+    const txt = item.querySelector('.txt');
+    try {
+      const buf = await file.arrayBuffer();
+      const hash = await huellaArchivo(buf);
+      if (hash && hashes.has(hash)) { repetidas++; txt.innerHTML = '<span class="no">Ya estaba importada: no se duplica.</span>'; hechas++; avance(); continue; }
+      let ex = null; const original = await blobADataURL(new Blob([buf], { type: file.type || 'image/jpeg' }));
+      if (/^data:image\/jpe?g/i.test(original)) { try { ex = piexif.load(original); } catch (e) { ex = null; } }
+      const fTom = exifFecha(ex); const gps = exifGPS(ex);
+      const fecha = fTom || new Date(file.lastModified || Date.now());
+      const jpg = await archivoADataURL(file);
+      const r = {
+        uid: uid(), origen: 'importada', origenHash: hash, fecha: fecha.toISOString(), fechaRevisar: !fTom,
+        pais: '', depto: '', ciudad: '', altitud: gps ? gps.alt : null, ubicManual: false,
+        geoInt: gps ? { lat: gps.lat, lon: gps.lon, acc: null } : null, ubicPendiente: !gps, coords: null,
+        personas: [], extras: [],
+      };
+      if (gps) {
+        try { Object.assign(r, await reverseGeocode(gps.lat, gps.lon)); await new Promise((ok) => setTimeout(ok, 1100)); }
+        catch (e) { /* sin internet: se completa después (completarCiudadesSinRed) */ }
+      }
+      const conExif = escribirExif(jpg, r);
+      r.blob = dataURLaBlob(conExif); r.thumb = await miniatura(conExif);
+      r.id = await dbPut(r); if (hash) hashes.add(hash);
+      item.querySelector('.th').style.backgroundImage = `url(${r.thumb})`;
+      const lFecha = fTom ? `<span class="ok">✓ Fecha de la foto:</span> ${fmtFechaCorta(fecha)} ${fmtHora(fecha, false)}`
+        : `<span class="no">✗ La foto no trae fecha:</span> se usó ${fmtFechaCorta(fecha)} (revisar)`;
+      const lUbic = gps ? `<span class="ok">✓ Ubicación:</span> ${esc(lugarTexto(r) || 'se completa con internet')}`
+        : '<span class="no">✗ Ubicación:</span> la foto no la trae → pendiente';
+      txt.innerHTML = `${lFecha}<br>${lUbic}<br><span class="caras">Buscando caras…</span>`;
+      encolarAnalisis(r.id).then(async () => {
+        const g = await dbGet(r.id); const cs = (g && g.caras) || [];
+        const el = txt.querySelector('.caras'); if (!el) return;
+        if (!g || !g.carasAnalizadas) { el.innerHTML = '<span class="no">No se pudieron buscar caras (se reintenta al abrir la ficha)</span>'; return; }
+        el.innerHTML = cs.length ? `<span class="ok">✓ ${cs.length} cara${cs.length > 1 ? 's' : ''}:</span> ` + esc(cs.map((c) => c.nombre ? c.nombre + ' ?' : '¿Quién es?').join(', '))
+          : 'Sin caras detectadas';
+      });
+    } catch (e) { txt.innerHTML = '<span class="no">No se pudo importar: ' + esc(e.message || String(e)) + '</span>'; }
+    hechas++; avance();
+  }
+  pintarUltima(); revisarPendientes();
 }
 
 /* ======================= respaldo ======================= */
@@ -628,7 +938,7 @@ async function importar(file) {
 
 /* ======================= navegación ======================= */
 function mostrar(id) {
-  ['scrDatos', 'scrGaleria', 'scrFicha'].forEach((s) => $(s).classList.toggle('hidden', s !== id));
+  ['scrDatos', 'scrGaleria', 'scrFicha', 'scrImportar'].forEach((s) => $(s).classList.toggle('hidden', s !== id));
 }
 function abrirDatos(modo) {
   modoDatos = modo;
@@ -646,9 +956,22 @@ function abrirDatos(modo) {
   mostrar('scrDatos');
   $('scrDatos').querySelector('.sh-body').scrollTop = 0;
 }
-function cerrarDatos() {
-  if (modoDatos === 'editar') { form = formGuardado; modoDatos = 'nueva'; mostrar('scrFicha'); return; }
-  mostrar(null);
+/* Lee lo escrito directamente de las casillas (en iPhone el último cambio del teclado puede no haber disparado 'input') */
+function sincronizarDOM() {
+  if ($('scrDatos').classList.contains('hidden')) return;
+  const ps = [...$('listaPersonas').querySelectorAll('input')].map((i) => i.value);
+  if (ps.length) form.personas = ps;
+  const ex = [...$('listaExtras').querySelectorAll('.kv')].map((r) => { const [k, v] = r.querySelectorAll('input'); return { k: k.value, v: v.value }; });
+  if (ex.length) form.extras = ex;
+  if (form.ubicManual) { form.pais = $('inpPais').value; form.depto = $('inpDepto').value; form.ciudad = $('inpCiudad').value; }
+}
+async function cerrarDatos() {
+  sincronizarDOM();
+  if (modoDatos === 'editar') { // "Listo" también guarda (antes descartaba: error reportado 30-sep)
+    await guardarFichaEditada(); const id = fichaActual.id;
+    form = formGuardado; modoDatos = 'nueva'; abrirFicha(id); return;
+  }
+  mostrar(null); pintarCamara();
 }
 let formGuardado = null;
 
@@ -670,11 +993,8 @@ function conectar() {
 
   $('btnDatosListo').onclick = cerrarDatos;
   $('btnGuardarDatos').onclick = async () => {
-    if (modoDatos === 'editar') {
-      await guardarFichaEditada(); const id = fichaActual.id;
-      form = formGuardado; modoDatos = 'nueva'; abrirFicha(id); return;
-    }
-    mostrar(null); setTimeout(() => tomarFoto(), 150);
+    if (modoDatos === 'editar') return cerrarDatos();
+    sincronizarDOM(); mostrar(null); setTimeout(() => tomarFoto(), 150);
   };
   $('inpFecha').onchange = () => { if ($('inpFecha').value) { form.fechaManual = new Date($('inpFecha').value).toISOString(); pintarDatos(); pintarCamara(); } };
   $('btnFechaAuto').onclick = () => { form.fechaManual = null; pintarDatos(); pintarCamara(); };
@@ -706,10 +1026,27 @@ function conectar() {
   $('inpBuscar').oninput = pintarGaleria;
   $('btnExportar').onclick = exportar;
   $('inpImportar').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importar(f); };
+  $('inpImportarFotos').onchange = (e) => { const fs = [...e.target.files]; e.target.value = ''; importarFotos(fs); };
+  $('btnImpCerrar').onclick = () => { importCancelado = true; mostrar('scrGaleria'); pintarGaleria(); };
 
   $('btnFichaVolver').onclick = () => { mostrar('scrGaleria'); pintarGaleria(); };
   $('btnFichaEditar').onclick = () => { formGuardado = form; abrirDatos('editar'); };
   $('btnFichaFotos').onclick = () => compartirFoto(fichaActual, false);
+  $('swNombres').onclick = () => { lsSet('mostrarNombres', !lsGet('mostrarNombres', true)); pintarCaras(); prepararCompartir(fichaActual); };
+  $('btnDetectar').onclick = () => { errorCaras = ''; encolarAnalisis(fichaActual.id); pintarCaras(); };
+  $('btnNombreManual').onclick = () => {
+    modoManual = true; $('hintManual').classList.remove('hidden');
+    if (!lsGet('mostrarNombres', true)) { lsSet('mostrarNombres', true); pintarCaras(); }
+  };
+  $('btnCancelarManual').onclick = () => { modoManual = false; $('hintManual').classList.add('hidden'); };
+  $('fotoWrap').onclick = (e) => {
+    if (!modoManual) return;
+    const r = $('fichaImg').getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    modoManual = false; $('hintManual').classList.add('hidden');
+    elegirNombre({ tipo: 'nuevo', x, y: Math.min(1, y + 0.03) });
+  };
   $('btnFichaCompartir').onclick = () => compartirFoto(fichaActual, true);
   $('btnFichaExacta').onclick = async () => {
     const f = fichaActual; const src = f.coords || f.geoInt;

@@ -133,6 +133,7 @@
     <span style="width:60px"></span>
   </div>
   <div class="sh-body">
+    <label class="btn pri imp">＋ Importar desde Fotos<input type="file" id="inpImportarFotos" accept="image/*" multiple hidden></label>
     <input class="buscar" id="inpBuscar" placeholder="Buscar persona, lugar o dato" autocomplete="off">
     <div class="banner hidden" id="bannerPendGal"></div>
     <div class="grid" id="grid"></div>
@@ -147,6 +148,20 @@
   </div>
 </section>
 
+<!-- ============ IMPORTAR ============ -->
+<section id="scrImportar" class="scr page hidden">
+  <div class="sh-head">
+    <button class="lnk" id="btnImpCerrar">‹ Galería</button>
+    <b id="impTitulo">Importando</b>
+    <span style="width:60px"></span>
+  </div>
+  <div class="sh-body">
+    <div class="impbar"><i id="impBarra"></i></div>
+    <div id="impLista"></div>
+    <p class="nota">Las caras se buscan en segundo plano: puedes volver a la galería. Lo que la foto no traiga (ubicación, personas nuevas, extras) se completa a mano en su ficha.</p>
+  </div>
+</section>
+
 <!-- ============ FICHA ============ -->
 <section id="scrFicha" class="scr page hidden">
   <div class="sh-head">
@@ -155,7 +170,12 @@
     <button class="lnk danger" id="btnBorrar">Borrar</button>
   </div>
   <div class="sh-body">
-    <img id="fichaImg" class="ficha-img" alt="">
+    <div class="banner hidden" id="hintManual" style="margin-top:0">Toca en la foto a la persona que quieres nombrar.
+      <div class="btns"><button class="btn" id="btnCancelarManual">Cancelar</button></div></div>
+    <div class="foto-wrap" id="fotoWrap"><img id="fichaImg" class="ficha-img" alt=""><div id="capaNombres" class="capa"></div></div>
+    <p class="nota" id="estadoCaras"></p>
+    <div class="tgl"><span>Nombres en la foto</span><button class="sw" id="swNombres" role="switch" aria-checked="true" aria-label="Nombres en la foto"></button></div>
+    <div class="btns"><button class="btn" id="btnNombreManual">＋ Nombre a mano</button><button class="btn hidden" id="btnDetectar">Buscar caras</button></div>
     <div class="box" id="fichaCampos"></div>
     <div class="banner hidden" id="fichaPend">
       <b>Ubicación pendiente</b>
