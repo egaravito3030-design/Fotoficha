@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FotoFicha">
+<meta name="theme-color" content="#000000">
+<title>FotoFicha</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ CAMARA ============ -->
+<section id="scrCamara" class="scr">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="camMsg" class="cam-msg hidden">
+    <p id="camMsgTxt">No se pudo abrir la cámara.</p>
+    <button class="btn pri" id="btnReintentarCam">Reintentar</button>
+    <label class="btn">Usar cámara del iPhone
+      <input type="file" id="inpCapturaNativa" accept="image/*" capture="environment" hidden>
+    </label>
+  </div>
+  <div class="topbar">
+    <button class="chip" id="chipUbic"><i class="dot"></i><span>Buscando ubicación…</span></button>
+    <button class="chip hidden" id="chipPend"></button>
+  </div>
+
+  <button class="tagbtn" id="tagCerrada"></button>
+  <div class="mini hidden" id="tagAbierta">
+    <div class="mini-rows" id="miniRows"></div>
+    <div class="mini-acc">
+      <button class="lnk" id="btnEditarDatos">Editar datos</button>
+      <button class="lnk" id="btnCerrarTag">▾ cerrar</button>
+    </div>
+  </div>
+
+  <button class="side l" id="btnGaleria" aria-label="Galería"></button>
+  <button class="shutter" id="btnDisparar" aria-label="Tomar foto"></button>
+  <button class="side r" id="btnGirar" aria-label="Cambiar cámara">⟲</button>
+  <div class="flash hidden" id="flash"></div>
+</section>
+
+<!-- ============ DATOS (hoja) ============ -->
+<section id="scrDatos" class="scr sheet hidden">
+  <div class="sh-head">
+    <b id="datosTitulo">Datos de la foto</b>
+    <button class="lnk" id="btnDatosListo">Listo</button>
+  </div>
+  <div class="sh-body">
+    <div class="banner hidden" id="bannerUbic">
+      <b>La ubicación está apagada</b>
+      Actívala para llenar ciudad, país y altitud solos.
+      <div class="btns">
+        <button class="btn pri" id="btnActivarUbic">Activar ubicación</button>
+        <button class="btn" id="btnUbicManual">Poner manual</button>
+      </div>
+    </div>
+
+    <div class="sec">Fecha y hora <span class="auto" id="badgeFecha">automático</span></div>
+    <div class="box">
+      <div class="f"><span class="k">Fecha</span><span class="v" id="vFecha"></span></div>
+      <div class="f"><span class="k">Hora</span><span class="v" id="vHora"></span></div>
+      <div class="f edit-fecha">
+        <input type="datetime-local" id="inpFecha" step="1">
+        <button class="lnk sm" id="btnFechaAuto">Volver a automático</button>
+      </div>
+    </div>
+
+    <div class="sec">Ubicación <span class="auto" id="badgeUbic">automático</span></div>
+    <div class="box">
+      <div id="ubicVista">
+        <div class="f"><span class="k">País</span><span class="v" id="vPais"></span></div>
+        <div class="f"><span class="k">Departamento</span><span class="v" id="vDepto"></span></div>
+        <div class="f"><span class="k">Ciudad</span><span class="v" id="vCiudad"></span></div>
+        <div class="f"><span class="k">Altitud</span><span class="v" id="vAlt"></span></div>
+      </div>
+      <div id="ubicManual" class="hidden">
+        <div class="inp"><input id="inpPais" placeholder="País" autocomplete="off"></div>
+        <div class="inp"><input id="inpDepto" placeholder="Departamento" autocomplete="off"></div>
+        <div class="inp"><input id="inpCiudad" placeholder="Ciudad" autocomplete="off"></div>
+      </div>
+      <div class="btns"><button class="btn" id="btnEditarUbic">Editar manual</button></div>
+      <button class="maplink hidden" id="btnUbicExacta">📍 Ubicación exacta ↗</button>
+    </div>
+    <p class="nota hidden" id="notaPendiente">La foto se guarda igual. Cuando haya ubicación, la app te pregunta si la completa.</p>
+
+    <div id="secCoords" class="hidden">
+      <div class="sec">Coordenadas <span class="auto">solo si tocas "Ubicación exacta"</span></div>
+      <div class="box opt">
+        <div class="f"><span class="k">Latitud</span><span class="v mono" id="vLat"></span></div>
+        <div class="f"><span class="k">Longitud</span><span class="v mono" id="vLon"></span></div>
+        <div class="f"><span class="k">Precisión</span><span class="v" id="vAcc"></span></div>
+        <div class="f"><span class="k muted">Quitar coordenadas</span><button class="x" id="btnQuitarCoords">✕</button></div>
+      </div>
+    </div>
+
+    <div class="sec">Personas en la foto</div>
+    <div class="box">
+      <div id="listaPersonas"></div>
+      <div class="sug" id="sugPersonas"></div>
+      <button class="add" id="btnAddPersona">＋ Agregar persona</button>
+    </div>
+
+    <div class="sec">Información extra</div>
+    <div class="box">
+      <div id="listaExtras"></div>
+      <div class="kv calc hidden" id="rowDiaCultivo"><div>Día del cultivo</div><div id="vDiaCultivo"></div></div>
+      <button class="add" id="btnAddExtra">＋ Agregar campo</button>
+    </div>
+
+    <details class="box det" id="detLotes">
+      <summary>Fechas de siembra (para "Día del cultivo")</summary>
+      <p class="nota">Si un campo extra se llama <b>Lote</b> y su valor coincide con un lote de esta lista, la app calcula sola el "Día del cultivo" (día 0 = día de siembra).</p>
+      <div id="listaLotes"></div>
+      <button class="add" id="btnAddLote">＋ Agregar lote</button>
+    </details>
+    <div style="height:90px"></div>
+  </div>
+  <button class="save" id="btnGuardarDatos">Guardar y tomar foto</button>
+</section>
+
+<!-- ============ GALERIA ============ -->
+<section id="scrGaleria" class="scr page hidden">
+  <div class="sh-head">
+    <button class="lnk" id="btnGalVolver">‹ Cámara</button>
+    <b>Galería</b>
+    <span style="width:60px"></span>
+  </div>
+  <div class="sh-body">
+    <label class="btn pri imp">＋ Importar desde Fotos<input type="file" id="inpImportarFotos" accept="image/*" multiple hidden></label>
+    <input class="buscar" id="inpBuscar" placeholder="Buscar persona, lugar o dato" autocomplete="off">
+    <div class="banner hidden" id="bannerPendGal"></div>
+    <div class="grid" id="grid"></div>
+    <p class="nota center" id="galVacia">Todavía no hay fotos.</p>
+    <div class="sec">Respaldo</div>
+    <div class="btns">
+      <button class="btn" id="btnExportar">Exportar respaldo</button>
+      <label class="btn">Importar respaldo<input type="file" id="inpImportar" accept=".json,application/json" hidden></label>
+    </div>
+    <p class="nota">Las fotos y fichas viven solo en este iPhone. Exporta un respaldo de vez en cuando y guárdalo en Archivos o iCloud.</p>
+    <div style="height:30px"></div>
+  </div>
+</section>
+
+<!-- ============ IMPORTAR ============ -->
+<section id="scrImportar" class="scr page hidden">
+  <div class="sh-head">
+    <button class="lnk" id="btnImpCerrar">‹ Galería</button>
+    <b id="impTitulo">Importando</b>
+    <span style="width:60px"></span>
+  </div>
+  <div class="sh-body">
+    <div class="impbar"><i id="impBarra"></i></div>
+    <div id="impLista"></div>
+    <p class="nota">Las caras se buscan en segundo plano: puedes volver a la galería. Lo que la foto no traiga (ubicación, personas nuevas, extras) se completa a mano en su ficha.</p>
+  </div>
+</section>
+
+<!-- ============ FICHA ============ -->
+<section id="scrFicha" class="scr page hidden">
+  <div class="sh-head">
+    <button class="lnk" id="btnFichaVolver">‹ Galería</button>
+    <b>Ficha</b>
+    <button class="lnk danger" id="btnBorrar">Borrar</button>
+  </div>
+  <div class="sh-body">
+    <div class="banner hidden" id="hintManual" style="margin-top:0">Toca en la foto a la persona que quieres nombrar.
+      <div class="btns"><button class="btn" id="btnCancelarManual">Cancelar</button></div></div>
+    <div class="foto-wrap" id="fotoWrap"><img id="fichaImg" class="ficha-img" alt=""><div id="capaNombres" class="capa"></div>
+      <button class="tagbtn tagficha" id="tagFicha"></button>
+      <div class="mini minificha hidden" id="miniFicha">
+        <div class="mini-rows" id="fichaCampos"></div>
+        <div class="tgl-mini"><span class="k">Nombres en la foto</span><button class="sw" id="swNombres" role="switch" aria-checked="true" aria-label="Nombres en la foto"></button></div>
+        <div class="mini-acc">
+          <button class="lnk" id="btnFichaEditar2">Editar datos</button>
+          <button class="lnk" id="btnCerrarFicha">▾ cerrar</button>
+        </div>
+      </div>
+    </div>
+    <p class="nota" id="estadoCaras"></p>
+    <div class="btns"><button class="btn" id="btnNombreManual">＋ Nombre a mano</button><button class="btn hidden" id="btnDetectar">Buscar caras</button></div>
+    <div class="banner hidden" id="fichaPend">
+      <b>Ubicación pendiente</b>
+      <span id="fichaPendTxt">Esta foto se tomó sin ubicación.</span>
+      <div class="btns"><button class="btn pri" id="btnCompletarUbic">Completar con la ubicación actual</button></div>
+    </div>
+    <button class="maplink hidden" id="btnFichaExacta">📍 Ubicación exacta ↗</button>
+    <div class="btns">
+      <button class="btn" id="btnFichaEditar">Editar</button>
+      <button class="btn" id="btnFichaFotos">Guardar en Fotos</button>
+      <button class="btn" id="btnFichaCompartir">Compartir</button>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</section>
+
+<div class="toast hidden" id="toast"></div>
+<div class="modal hidden" id="modal"><div class="modal-box"><div id="modalTxt"></div><div class="btns" id="modalBtns"></div></div></div>
+
+<datalist id="dlNombres"></datalist>
+<datalist id="dlClaves"></datalist>
+
+<script src="lib/piexif.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
