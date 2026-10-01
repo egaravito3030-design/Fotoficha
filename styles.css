@@ -130,5 +130,5 @@ input::placeholder{color:#6c7480}
 .tgl-mini{display:flex;justify-content:space-between;align-items:center;padding:4px 0 2px}
 .tgl-mini .k{color:var(--sub)}
 .tgl-mini .sw{transform:scale(.8);transform-origin:right center}
-.lblc{touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.lblc{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:grab}
 .lblc.arrastrando{outline:2px dashed #fff;box-shadow:0 4px 14px rgba(0,0,0,.5);z-index:5}

@@ -198,6 +198,7 @@ async function revisarPendientes() {
 function abrirGoogleMaps(lat, lon) {
   const app = `comgooglemaps://?q=${lat},${lon}&center=${lat},${lon}&zoom=17`;
   const web = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+  if (/Android/i.test(navigator.userAgent)) { window.location.href = web; return; } // en Android este link abre la app de Google Maps
   let salio = false;
   const onHide = () => { if (document.visibilityState === 'hidden') salio = true; };
   document.addEventListener('visibilitychange', onHide);
@@ -719,27 +720,42 @@ function nombresConfirmados(f) {
 }
 /* Nombre en la foto: toque corto = elegir/confirmar nombre; arrastrar = moverlo a cualquier parte (se guarda al soltar) */
 function arrastrable(l, obj) {
-  let ini = null, movido = false;
-  l.onpointerdown = (e) => { e.stopPropagation(); ini = { x: e.clientX, y: e.clientY }; movido = false; try { l.setPointerCapture(e.pointerId); } catch (err) { /* */ } };
-  l.onpointermove = (e) => {
-    if (!ini) return;
-    if (!movido && Math.hypot(e.clientX - ini.x, e.clientY - ini.y) < 8) return;
-    movido = true; l.classList.add('arrastrando');
+  // iPhone: eventos táctiles explícitos (touchmove con preventDefault); PC: mouse. Toque corto = click -> elegir nombre.
+  let ini = null, movido = false, recienArrastrado = false;
+  const mover = (cx, cy) => {
     const r = $('fichaImg').getBoundingClientRect();
-    const x = Math.max(0.02, Math.min(0.98, (e.clientX - r.left) / r.width));
-    const y = Math.max(0, Math.min(0.95, (e.clientY - r.top) / r.height));
+    const x = Math.max(0.02, Math.min(0.98, (cx - r.left) / r.width));
+    const y = Math.max(0, Math.min(0.95, (cy - r.top) / r.height));
     l.style.left = x * 100 + '%'; l.style.top = y * 100 + '%'; l.dataset.x = x; l.dataset.y = y;
   };
-  l.onpointerup = async () => {
-    if (!ini) return; ini = null; l.classList.remove('arrastrando');
-    if (!movido) { elegirNombre(obj); return; }
-    const f = fichaActual, x = +l.dataset.x, y = +l.dataset.y;
-    if (obj.tipo === 'cara') { f.caras[obj.i].lx = x; f.caras[obj.i].ly = y; } else { f.manuales[obj.i].x = x; f.manuales[obj.i].y = y; }
-    await dbPut(f); prepararCompartir(f);
+  const empezar = (cx, cy) => { ini = { x: cx, y: cy }; movido = false; };
+  const seguir = (cx, cy) => {
+    if (!ini) return false;
+    if (!movido && Math.hypot(cx - ini.x, cy - ini.y) < 8) return false;
+    movido = true; l.classList.add('arrastrando'); mover(cx, cy); return true;
   };
-  l.onpointercancel = () => { ini = null; l.classList.remove('arrastrando'); };
-  l.onclick = (e) => e.stopPropagation();
+  const terminar = async () => {
+    if (!ini) return; ini = null; l.classList.remove('arrastrando');
+    if (!movido) return;
+    recienArrastrado = true; setTimeout(() => { recienArrastrado = false; }, 400);
+    await guardarPosicion(obj, +l.dataset.x, +l.dataset.y);
+  };
+  l.addEventListener('touchstart', (e) => { e.stopPropagation(); const t = e.touches[0]; empezar(t.clientX, t.clientY); }, { passive: true });
+  l.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (seguir(t.clientX, t.clientY)) e.preventDefault(); }, { passive: false });
+  l.addEventListener('touchend', (e) => { if (movido) e.preventDefault(); terminar(); }, { passive: false });
+  l.addEventListener('touchcancel', () => { ini = null; l.classList.remove('arrastrando'); });
+  l.onpointerdown = (e) => { if (e.pointerType !== 'mouse') return; e.stopPropagation(); empezar(e.clientX, e.clientY); try { l.setPointerCapture(e.pointerId); } catch (err) { /* */ } };
+  l.onpointermove = (e) => { if (e.pointerType === 'mouse') seguir(e.clientX, e.clientY); };
+  l.onpointerup = (e) => { if (e.pointerType === 'mouse') terminar(); };
+  l.onclick = (e) => { e.stopPropagation(); if (recienArrastrado || movido) return; if (moverObj) return; elegirNombre(obj); };
 }
+async function guardarPosicion(obj, x, y) {
+  const f = fichaActual;
+  if (obj.tipo === 'cara') { f.caras[obj.i].lx = x; f.caras[obj.i].ly = y; } else { f.manuales[obj.i].x = x; f.manuales[obj.i].y = y; }
+  await dbPut(f); prepararCompartir(f);
+}
+/* Alternativa sin arrastrar: "Mover este nombre" y luego tocar el sitio en la foto */
+let moverObj = null;
 function pintarCaras() {
   const f = fichaActual; if (!f) return;
   const capa = $('capaNombres'); capa.innerHTML = '';
@@ -795,6 +811,10 @@ function elegirNombre(obj) {
   boton('Usar el nombre escrito', () => { const v = ($('inpOtroNombre').value || '').trim(); if (v) asignarNombre(obj, v); });
   if (obj.tipo === 'cara') boton(actual && actual.nombre ? 'Quitar nombre' : 'No es una persona', () => asignarNombre(obj, actual && actual.nombre ? '' : null));
   if (obj.tipo === 'manual') boton('Quitar etiqueta', () => asignarNombre(obj, null));
+  if (actual && actual.nombre && obj.tipo !== 'nuevo') boton('Mover este nombre', () => {
+    moverObj = obj; $('hintManual').firstChild.textContent = 'Toca en la foto el sitio donde quieres el nombre. ';
+    $('hintManual').classList.remove('hidden');
+  });
   boton('Cancelar', () => {});
   $('modal').classList.remove('hidden');
 }
@@ -1066,15 +1086,20 @@ function conectar() {
   $('swNombres').onclick = () => { lsSet('mostrarNombres', !lsGet('mostrarNombres', true)); pintarCaras(); prepararCompartir(fichaActual); };
   $('btnDetectar').onclick = () => { errorCaras = ''; encolarAnalisis(fichaActual.id); pintarCaras(); };
   $('btnNombreManual').onclick = () => {
+    $('hintManual').firstChild.textContent = 'Toca en la foto a la persona que quieres nombrar. ';
     modoManual = true; $('hintManual').classList.remove('hidden');
     if (!lsGet('mostrarNombres', true)) { lsSet('mostrarNombres', true); pintarCaras(); }
   };
-  $('btnCancelarManual').onclick = () => { modoManual = false; $('hintManual').classList.add('hidden'); };
-  $('fotoWrap').onclick = (e) => {
-    if (!modoManual) return;
+  $('btnCancelarManual').onclick = () => { modoManual = false; moverObj = null; $('hintManual').classList.add('hidden'); };
+  $('fotoWrap').onclick = async (e) => {
+    if (!modoManual && !moverObj) return;
     const r = $('fichaImg').getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
     if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    if (moverObj) {
+      const o = moverObj; moverObj = null; $('hintManual').classList.add('hidden');
+      await guardarPosicion(o, Math.max(0.02, Math.min(0.98, x)), Math.max(0, Math.min(0.95, y))); pintarCaras(); return;
+    }
     modoManual = false; $('hintManual').classList.add('hidden');
     elegirNombre({ tipo: 'nuevo', x, y: Math.min(1, y + 0.03) });
   };
