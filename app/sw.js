@@ -1,6 +1,6 @@
 /* Service worker de FotoFicha: guarda la app para que abra sin internet.
    Al publicar una versión nueva, cambiar CACHE (ej. fotoficha-v2). */
-const CACHE = 'fotoficha-v4';
+const CACHE = 'fotoficha-v5-2';
 const ARCHIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'lib/piexif.js', 'manifest.webmanifest',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', (e) => {

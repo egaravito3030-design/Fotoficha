@@ -144,6 +144,7 @@
       <label class="btn">Importar respaldo<input type="file" id="inpImportar" accept=".json,application/json" hidden></label>
     </div>
     <p class="nota">Las fotos y fichas viven solo en este iPhone. Exporta un respaldo de vez en cuando y guárdalo en Archivos o iCloud.</p>
+    <p class="nota center" style="margin-top:4px">FotoFicha versión 5.2</p>
     <div style="height:30px"></div>
   </div>
 </section>
@@ -172,29 +173,26 @@
   <div class="sh-body">
     <div class="banner hidden" id="hintManual" style="margin-top:0">Toca en la foto a la persona que quieres nombrar.
       <div class="btns"><button class="btn" id="btnCancelarManual">Cancelar</button></div></div>
-    <div class="foto-wrap" id="fotoWrap"><img id="fichaImg" class="ficha-img" alt=""><div id="capaNombres" class="capa"></div>
+    <div class="foto-wrap" id="fotoWrap"><img id="fichaImg" class="ficha-img" alt="" draggable="false"><div id="capaNombres" class="capa"></div>
       <button class="tagbtn tagficha" id="tagFicha"></button>
-      <div class="mini minificha hidden" id="miniFicha">
-        <div class="mini-rows" id="fichaCampos"></div>
-        <div class="tgl-mini"><span class="k">Nombres en la foto</span><button class="sw" id="swNombres" role="switch" aria-checked="true" aria-label="Nombres en la foto"></button></div>
-        <div class="mini-acc">
-          <button class="lnk" id="btnFichaEditar2">Editar datos</button>
-          <button class="lnk" id="btnCerrarFicha">▾ cerrar</button>
-        </div>
+    </div>
+    <div class="mini minificha hidden" id="miniFicha">
+      <div class="mini-rows" id="fichaCampos"></div>
+      <div class="tgl-mini"><span class="k">Nombres en la foto</span><button class="sw" id="swNombres" role="switch" aria-checked="true" aria-label="Nombres en la foto"></button></div>
+      <p class="nota" id="estadoCaras"></p>
+      <div class="btns"><button class="btn" id="btnNombreManual">＋ Nombre a mano</button><button class="btn hidden" id="btnDetectar">Buscar caras</button></div>
+      <div class="banner hidden" id="fichaPend">
+        <b>Ubicación pendiente</b>
+        <span id="fichaPendTxt">Esta foto se tomó sin ubicación.</span>
+        <div class="btns"><button class="btn pri" id="btnCompletarUbic">Completar con la ubicación actual</button></div>
       </div>
-    </div>
-    <p class="nota" id="estadoCaras"></p>
-    <div class="btns"><button class="btn" id="btnNombreManual">＋ Nombre a mano</button><button class="btn hidden" id="btnDetectar">Buscar caras</button></div>
-    <div class="banner hidden" id="fichaPend">
-      <b>Ubicación pendiente</b>
-      <span id="fichaPendTxt">Esta foto se tomó sin ubicación.</span>
-      <div class="btns"><button class="btn pri" id="btnCompletarUbic">Completar con la ubicación actual</button></div>
-    </div>
-    <button class="maplink hidden" id="btnFichaExacta">📍 Ubicación exacta ↗</button>
-    <div class="btns">
-      <button class="btn" id="btnFichaEditar">Editar</button>
-      <button class="btn" id="btnFichaFotos">Guardar en Fotos</button>
-      <button class="btn" id="btnFichaCompartir">Compartir</button>
+      <button class="maplink hidden" id="btnFichaExacta">📍 Ubicación exacta ↗</button>
+      <div class="btns">
+        <button class="btn" id="btnFichaEditar">Editar</button>
+        <button class="btn" id="btnFichaFotos">Guardar en Fotos</button>
+        <button class="btn" id="btnFichaCompartir">Compartir</button>
+      </div>
+      <div class="mini-acc"><button class="lnk" id="btnCerrarFicha">▾ cerrar</button></div>
     </div>
     <div style="height:30px"></div>
   </div>
