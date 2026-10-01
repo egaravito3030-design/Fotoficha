@@ -122,3 +122,13 @@ input::placeholder{color:#6c7480}
 .item{display:flex;gap:10px;background:var(--field);border-radius:12px;padding:9px;margin-bottom:8px;font-size:13px}
 .item .th{width:56px;height:56px;border-radius:8px;flex:none;background:#333 center/cover no-repeat}
 .item .ok{color:var(--ok)} .item .no{color:var(--warn)}
+/* ficha: información minimizada sobre la foto (mismo estilo que la cámara, v4) */
+.tagficha{bottom:10px;z-index:3;font-size:12.5px;padding:7px 13px}
+.minificha{bottom:8px;left:8px;right:8px;z-index:4;max-height:calc(100% - 16px);overflow-y:auto;font-size:12.5px}
+.minificha .f{padding:2px 0;border:0;font-size:12.5px;background:none}
+.minificha .f .k{color:var(--sub)}
+.tgl-mini{display:flex;justify-content:space-between;align-items:center;padding:4px 0 2px}
+.tgl-mini .k{color:var(--sub)}
+.tgl-mini .sw{transform:scale(.8);transform-origin:right center}
+.lblc{touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.lblc.arrastrando{outline:2px dashed #fff;box-shadow:0 4px 14px rgba(0,0,0,.5);z-index:5}

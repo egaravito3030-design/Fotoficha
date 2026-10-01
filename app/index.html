@@ -172,11 +172,19 @@
   <div class="sh-body">
     <div class="banner hidden" id="hintManual" style="margin-top:0">Toca en la foto a la persona que quieres nombrar.
       <div class="btns"><button class="btn" id="btnCancelarManual">Cancelar</button></div></div>
-    <div class="foto-wrap" id="fotoWrap"><img id="fichaImg" class="ficha-img" alt=""><div id="capaNombres" class="capa"></div></div>
+    <div class="foto-wrap" id="fotoWrap"><img id="fichaImg" class="ficha-img" alt=""><div id="capaNombres" class="capa"></div>
+      <button class="tagbtn tagficha" id="tagFicha"></button>
+      <div class="mini minificha hidden" id="miniFicha">
+        <div class="mini-rows" id="fichaCampos"></div>
+        <div class="tgl-mini"><span class="k">Nombres en la foto</span><button class="sw" id="swNombres" role="switch" aria-checked="true" aria-label="Nombres en la foto"></button></div>
+        <div class="mini-acc">
+          <button class="lnk" id="btnFichaEditar2">Editar datos</button>
+          <button class="lnk" id="btnCerrarFicha">▾ cerrar</button>
+        </div>
+      </div>
+    </div>
     <p class="nota" id="estadoCaras"></p>
-    <div class="tgl"><span>Nombres en la foto</span><button class="sw" id="swNombres" role="switch" aria-checked="true" aria-label="Nombres en la foto"></button></div>
     <div class="btns"><button class="btn" id="btnNombreManual">＋ Nombre a mano</button><button class="btn hidden" id="btnDetectar">Buscar caras</button></div>
-    <div class="box" id="fichaCampos"></div>
     <div class="banner hidden" id="fichaPend">
       <b>Ubicación pendiente</b>
       <span id="fichaPendTxt">Esta foto se tomó sin ubicación.</span>

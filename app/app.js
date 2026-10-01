@@ -556,6 +556,10 @@ async function abrirFicha(id) {
   if (f.origen === 'importada') filas.push(['Origen', 'Importada de Fotos']);
   if (f.coords) filas.push(['Coordenadas', `${f.coords.lat.toFixed(6)}, ${f.coords.lon.toFixed(6)} (±${Math.round(f.coords.acc)} m)`]);
   $('fichaCampos').innerHTML = filas.map(([k, v]) => `<div class="f"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('');
+  // información minimizada sobre la foto, igual que la etiqueta de la cámara (pedido de Mojon, v4)
+  const nP = [...new Set([...(f.personas || []), ...nombresConfirmados(f)])].length, nE = (f.extras || []).length;
+  $('tagFicha').innerHTML = `🏷 ${esc(f.ciudad || f.depto || f.pais || (f.ubicPendiente ? 'Sin ubicación' : 'Sin lugar'))} · ${nP} persona${nP === 1 ? '' : 's'} · ${nE} extra <span class="ar">▴</span>`;
+  $('miniFicha').classList.add('hidden'); $('tagFicha').classList.remove('hidden');
   $('fichaPend').classList.toggle('hidden', !f.ubicPendiente);
   $('btnCompletarUbic').classList.toggle('hidden', geo.estado !== 'activa');
   $('fichaPendTxt').textContent = geo.estado === 'activa'
@@ -713,6 +717,29 @@ function nombresConfirmados(f) {
   return [...(f.caras || []).filter((c) => c.estado === 'confirmado' && c.nombre).map((c) => c.nombre),
     ...(f.manuales || []).filter((m) => m.nombre).map((m) => m.nombre)];
 }
+/* Nombre en la foto: toque corto = elegir/confirmar nombre; arrastrar = moverlo a cualquier parte (se guarda al soltar) */
+function arrastrable(l, obj) {
+  let ini = null, movido = false;
+  l.onpointerdown = (e) => { e.stopPropagation(); ini = { x: e.clientX, y: e.clientY }; movido = false; try { l.setPointerCapture(e.pointerId); } catch (err) { /* */ } };
+  l.onpointermove = (e) => {
+    if (!ini) return;
+    if (!movido && Math.hypot(e.clientX - ini.x, e.clientY - ini.y) < 8) return;
+    movido = true; l.classList.add('arrastrando');
+    const r = $('fichaImg').getBoundingClientRect();
+    const x = Math.max(0.02, Math.min(0.98, (e.clientX - r.left) / r.width));
+    const y = Math.max(0, Math.min(0.95, (e.clientY - r.top) / r.height));
+    l.style.left = x * 100 + '%'; l.style.top = y * 100 + '%'; l.dataset.x = x; l.dataset.y = y;
+  };
+  l.onpointerup = async () => {
+    if (!ini) return; ini = null; l.classList.remove('arrastrando');
+    if (!movido) { elegirNombre(obj); return; }
+    const f = fichaActual, x = +l.dataset.x, y = +l.dataset.y;
+    if (obj.tipo === 'cara') { f.caras[obj.i].lx = x; f.caras[obj.i].ly = y; } else { f.manuales[obj.i].x = x; f.manuales[obj.i].y = y; }
+    await dbPut(f); prepararCompartir(f);
+  };
+  l.onpointercancel = () => { ini = null; l.classList.remove('arrastrando'); };
+  l.onclick = (e) => e.stopPropagation();
+}
 function pintarCaras() {
   const f = fichaActual; if (!f) return;
   const capa = $('capaNombres'); capa.innerHTML = '';
@@ -727,14 +754,14 @@ function pintarCaras() {
     const l = document.createElement('button');
     l.className = 'lblc' + (c.estado === 'sugerido' ? ' sug' : '') + (!c.nombre ? ' nn' : '');
     l.textContent = !c.nombre ? '¿Quién es?' : (c.estado === 'sugerido' ? c.nombre + ' ?' : c.nombre);
-    l.style.left = (c.x + c.w / 2) * 100 + '%'; l.style.top = Math.min(0.93, c.y + c.h) * 100 + '%';
-    l.onclick = (e) => { e.stopPropagation(); elegirNombre({ tipo: 'cara', i }); };
+    l.style.left = (c.lx != null ? c.lx : c.x + c.w / 2) * 100 + '%'; l.style.top = (c.ly != null ? c.ly : Math.min(0.93, c.y + c.h)) * 100 + '%';
+    arrastrable(l, { tipo: 'cara', i });
     capa.append(box, l);
   });
   (f.manuales || []).forEach((m, i) => {
     const l = document.createElement('button'); l.className = 'lblc man';
-    l.textContent = m.nombre; l.style.left = m.x * 100 + '%'; l.style.top = Math.min(0.93, m.y) * 100 + '%';
-    l.onclick = (e) => { e.stopPropagation(); elegirNombre({ tipo: 'manual', i }); };
+    l.textContent = m.nombre; l.style.left = m.x * 100 + '%'; l.style.top = Math.min(0.95, m.y) * 100 + '%';
+    arrastrable(l, { tipo: 'manual', i });
     capa.appendChild(l);
   });
   const vis = caras.filter((c) => c.estado !== 'descartado');
@@ -799,7 +826,7 @@ async function prepararCompartir(f) {
   compartirListo = { id: f.id, blob: null };
   let blob = f.blob;
   const etiquetas = [
-    ...(f.caras || []).filter((c) => c.estado === 'confirmado' && c.nombre).map((c) => ({ t: c.nombre, x: c.x + c.w / 2, y: c.y + c.h })),
+    ...(f.caras || []).filter((c) => c.estado === 'confirmado' && c.nombre).map((c) => ({ t: c.nombre, x: c.lx != null ? c.lx : c.x + c.w / 2, y: c.ly != null ? c.ly : c.y + c.h })),
     ...(f.manuales || []).filter((m) => m.nombre).map((m) => ({ t: m.nombre, x: m.x, y: m.y })),
   ];
   if (lsGet('mostrarNombres', true) && etiquetas.length) {
@@ -1031,6 +1058,10 @@ function conectar() {
 
   $('btnFichaVolver').onclick = () => { mostrar('scrGaleria'); pintarGaleria(); };
   $('btnFichaEditar').onclick = () => { formGuardado = form; abrirDatos('editar'); };
+  $('btnFichaEditar2').onclick = () => $('btnFichaEditar').click();
+  $('tagFicha').onclick = (e) => { e.stopPropagation(); $('tagFicha').classList.add('hidden'); $('miniFicha').classList.remove('hidden'); };
+  $('btnCerrarFicha').onclick = (e) => { e.stopPropagation(); $('miniFicha').classList.add('hidden'); $('tagFicha').classList.remove('hidden'); };
+  $('miniFicha').onclick = (e) => e.stopPropagation();
   $('btnFichaFotos').onclick = () => compartirFoto(fichaActual, false);
   $('swNombres').onclick = () => { lsSet('mostrarNombres', !lsGet('mostrarNombres', true)); pintarCaras(); prepararCompartir(fichaActual); };
   $('btnDetectar').onclick = () => { errorCaras = ''; encolarAnalisis(fichaActual.id); pintarCaras(); };
