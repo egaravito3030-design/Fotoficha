@@ -129,8 +129,8 @@
 <section id="scrGaleria" class="scr page hidden">
   <div class="sh-head">
     <button class="lnk" id="btnGalVolver">‹ Cámara</button>
-    <b>Galería</b>
-    <span style="width:60px"></span>
+    <b id="galTitulo">Galería</b>
+    <button class="lnk" id="btnSeleccionar">Seleccionar</button>
   </div>
   <div class="sh-body">
     <label class="btn pri imp">＋ Importar desde Fotos<input type="file" id="inpImportarFotos" accept="image/*" multiple hidden></label>
@@ -143,8 +143,8 @@
       <button class="btn" id="btnExportar">Exportar respaldo</button>
       <label class="btn">Importar respaldo<input type="file" id="inpImportar" accept=".json,application/json" hidden></label>
     </div>
-    <p class="nota">Las fotos y fichas viven solo en este iPhone. Exporta un respaldo de vez en cuando y guárdalo en Archivos o iCloud.</p>
-    <p class="nota center" style="margin-top:4px">FotoFicha versión 5.2</p>
+    <p class="nota">Las fotos y fichas viven solo en este celular. Exporta un respaldo de vez en cuando y guárdalo en Archivos o iCloud.</p>
+    <p class="nota center" style="margin-top:4px">FotoFicha versión 5.3</p>
     <div style="height:30px"></div>
   </div>
 </section>
@@ -163,6 +163,8 @@
   </div>
 </section>
 
+<div class="selbar hidden" id="selBar"><span id="selCuenta">0 fotos</span><button class="del" id="btnBorrarSel">Borrar</button></div>
+
 <!-- ============ FICHA ============ -->
 <section id="scrFicha" class="scr page hidden">
   <div class="sh-head">
@@ -174,6 +176,7 @@
     <div class="banner hidden" id="hintManual" style="margin-top:0">Toca en la foto a la persona que quieres nombrar.
       <div class="btns"><button class="btn" id="btnCancelarManual">Cancelar</button></div></div>
     <div class="foto-wrap" id="fotoWrap"><img id="fichaImg" class="ficha-img" alt="" draggable="false"><div id="capaNombres" class="capa"></div>
+      <button class="ojo" id="btnOjo"></button>
       <button class="tagbtn tagficha" id="tagFicha"></button>
     </div>
     <div class="mini minificha hidden" id="miniFicha">

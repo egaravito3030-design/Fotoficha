@@ -522,6 +522,28 @@ function pintarTodo() {
 
 /* ======================= galería y ficha ======================= */
 let urlsGal = [];
+/* v5.3: seleccionar varias fotos y borrarlas de una vez (aprobado por Mojon 1-oct) */
+let seleccion = null, idsVisibles = [];
+function pintarSeleccion() {
+  const on = !!seleccion; const n = on ? seleccion.size : 0;
+  $('scrGaleria').classList.toggle('seleccionando', on);
+  $('selBar').classList.toggle('hidden', !on);
+  $('galTitulo').textContent = on ? `${n} seleccionada${n === 1 ? '' : 's'}` : 'Galería';
+  $('btnSeleccionar').textContent = on ? 'Cancelar' : 'Seleccionar';
+  $('btnGalVolver').textContent = on ? 'Todas' : '‹ Cámara';
+  $('selCuenta').textContent = `${n} foto${n === 1 ? '' : 's'}`;
+  $('btnBorrarSel').disabled = n === 0;
+}
+function salirSeleccion() { seleccion = null; pintarSeleccion(); document.querySelectorAll('#grid .cel.sel').forEach((c) => c.classList.remove('sel')); }
+async function borrarSeleccion() {
+  const ids = [...seleccion]; if (!ids.length) return;
+  const ok = await modal(`<b>¿Borrar ${ids.length} foto${ids.length > 1 ? 's' : ''} y sus fichas?</b><p class="nota">No se puede deshacer. Las copias que ya guardaste en la app Fotos se quedan.</p>`,
+    [{ txt: 'Cancelar', val: false }, { txt: `Borrar ${ids.length}`, val: true, pri: true }]);
+  if (!ok) return;
+  for (const id of ids) await dbDel(id);
+  toast(`${ids.length} foto${ids.length > 1 ? 's' : ''} borrada${ids.length > 1 ? 's' : ''}`);
+  salirSeleccion(); pintarGaleria(); pintarUltima();
+}
 async function pintarGaleria() {
   const q = norm($('inpBuscar').value);
   const todas = (await dbAll()).reverse();
@@ -532,9 +554,16 @@ async function pintarGaleria() {
     c.style.backgroundImage = `url(${f.thumb})`;
     const cap = [(f.personas || [])[0], f.ciudad].filter(Boolean).join(' · ') || fmtFechaCorta(new Date(f.fecha));
     c.innerHTML = (f.origen === 'importada' ? '<span class="bdg">importada</span>' : '') + (f.ubicPendiente ? '<span class="pend">sin ubicación</span>' : '') + `<span class="cap">${esc(cap)}</span>`;
-    c.onclick = () => abrirFicha(f.id);
+    c.insertAdjacentHTML('beforeend', '<i class="chk"></i>');
+    if (seleccion && seleccion.has(f.id)) c.classList.add('sel');
+    c.onclick = () => {
+      if (!seleccion) return abrirFicha(f.id);
+      if (seleccion.has(f.id)) seleccion.delete(f.id); else seleccion.add(f.id);
+      c.classList.toggle('sel', seleccion.has(f.id)); pintarSeleccion();
+    };
     g.appendChild(c);
   });
+  idsVisibles = lista.map((f) => f.id);
   $('galVacia').classList.toggle('hidden', lista.length > 0);
   $('galVacia').textContent = todas.length ? 'Nada coincide con la búsqueda.' : 'Todavía no hay fotos.';
   revisarPendientes();
@@ -761,6 +790,7 @@ function pintarCaras() {
   const capa = $('capaNombres'); capa.innerHTML = '';
   const ver = lsGet('mostrarNombres', true);
   $('swNombres').classList.toggle('off', !ver); $('swNombres').setAttribute('aria-checked', String(ver));
+  $('btnOjo').textContent = ver ? '🙈 Ocultar nombres' : '👁 Mostrar nombres';
   capa.classList.toggle('oculta', !ver);
   const caras = f.caras || [];
   caras.forEach((c, i) => {
@@ -985,6 +1015,7 @@ async function importar(file) {
 
 /* ======================= navegación ======================= */
 function mostrar(id) {
+  if (id !== 'scrGaleria' && seleccion) salirSeleccion();
   ['scrDatos', 'scrGaleria', 'scrFicha', 'scrImportar'].forEach((s) => $(s).classList.toggle('hidden', s !== id));
 }
 function abrirDatos(modo) {
@@ -1069,7 +1100,12 @@ function conectar() {
   $('btnAddExtra').onclick = () => { form.extras.push({ k: '', v: '' }); pintarExtras(); const ins = $('listaExtras').querySelectorAll('input'); ins[ins.length - 2].focus(); };
   $('btnAddLote').onclick = () => { const x = lotes(); x.push({ nombre: '', siembra: '' }); lsSet('lotes', x); pintarLotes(); };
 
-  $('btnGalVolver').onclick = () => mostrar(null);
+  $('btnGalVolver').onclick = () => {
+    if (seleccion) { idsVisibles.forEach((id) => seleccion.add(id)); pintarGaleria(); pintarSeleccion(); return; } // "Todas"
+    mostrar(null);
+  };
+  $('btnSeleccionar').onclick = () => { if (seleccion) salirSeleccion(); else { seleccion = new Set(); pintarSeleccion(); } };
+  $('btnBorrarSel').onclick = borrarSeleccion;
   $('inpBuscar').oninput = pintarGaleria;
   $('btnExportar').onclick = exportar;
   $('inpImportar').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importar(f); };
@@ -1084,6 +1120,7 @@ function conectar() {
   // Android/iPhone: evita el menú "copiar / descargar imagen" al dejar el dedo sobre la foto o un nombre
   $('fotoWrap').addEventListener('contextmenu', (e) => e.preventDefault());
   $('btnFichaFotos').onclick = () => compartirFoto(fichaActual, false);
+  $('btnOjo').onclick = (e) => { e.stopPropagation(); $('swNombres').click(); };
   $('swNombres').onclick = () => { lsSet('mostrarNombres', !lsGet('mostrarNombres', true)); pintarCaras(); prepararCompartir(fichaActual); };
   $('btnDetectar').onclick = () => { errorCaras = ''; encolarAnalisis(fichaActual.id); pintarCaras(); };
   $('btnNombreManual').onclick = () => {

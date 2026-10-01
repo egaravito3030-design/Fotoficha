@@ -1,6 +1,6 @@
 /* Service worker de FotoFicha: guarda la app para que abra sin internet.
    Al publicar una versión nueva, cambiar CACHE (ej. fotoficha-v2). */
-const CACHE = 'fotoficha-v5-2';
+const CACHE = 'fotoficha-v5-3';
 const ARCHIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'lib/piexif.js', 'manifest.webmanifest',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', (e) => {
@@ -21,7 +21,8 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   // primero la red (para recibir actualizaciones), si no hay red, la copia guardada
-  e.respondWith(fetch(e.request).then((r) => {
+  // cache:'no-cache' = siempre pregunta a GitHub si hay versión nueva (sin esperar 10 min)
+  e.respondWith(fetch(e.request.url, { cache: 'no-cache' }).then((r) => {
     const copia = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copia)); return r;
   }).catch(() => caches.match(e.request, { ignoreSearch: true })));
 });
