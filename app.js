@@ -1078,14 +1078,16 @@ function conectar() {
 
   $('btnFichaVolver').onclick = () => { mostrar('scrGaleria'); pintarGaleria(); };
   $('btnFichaEditar').onclick = () => { formGuardado = form; abrirDatos('editar'); };
-  $('btnFichaEditar2').onclick = () => $('btnFichaEditar').click();
   $('tagFicha').onclick = (e) => { e.stopPropagation(); $('tagFicha').classList.add('hidden'); $('miniFicha').classList.remove('hidden'); };
   $('btnCerrarFicha').onclick = (e) => { e.stopPropagation(); $('miniFicha').classList.add('hidden'); $('tagFicha').classList.remove('hidden'); };
   $('miniFicha').onclick = (e) => e.stopPropagation();
+  // Android/iPhone: evita el menú "copiar / descargar imagen" al dejar el dedo sobre la foto o un nombre
+  $('fotoWrap').addEventListener('contextmenu', (e) => e.preventDefault());
   $('btnFichaFotos').onclick = () => compartirFoto(fichaActual, false);
   $('swNombres').onclick = () => { lsSet('mostrarNombres', !lsGet('mostrarNombres', true)); pintarCaras(); prepararCompartir(fichaActual); };
   $('btnDetectar').onclick = () => { errorCaras = ''; encolarAnalisis(fichaActual.id); pintarCaras(); };
   $('btnNombreManual').onclick = () => {
+    $('miniFicha').classList.add('hidden'); $('tagFicha').classList.remove('hidden');
     $('hintManual').firstChild.textContent = 'Toca en la foto a la persona que quieres nombrar. ';
     modoManual = true; $('hintManual').classList.remove('hidden');
     if (!lsGet('mostrarNombres', true)) { lsSet('mostrarNombres', true); pintarCaras(); }
